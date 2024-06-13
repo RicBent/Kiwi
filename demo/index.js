@@ -1,72 +1,43 @@
-import init_kiwi from './kiwi-wasm.js';
-
 const elVersion = document.getElementById('version');
 const elInput = document.getElementById('input');
 const elResult = document.getElementById('result');
 
-const kiwiPromise = init_kiwi();
+const worker = new Worker('./worker.js', { type: 'module' });
+worker.onmessage = (event) => {
+    const data = event.data ?? {};
 
-globalThis.kiwi = null;
-globalThis.kiwiPromise = kiwiPromise;
-
-kiwiPromise.then(async (kiwi) => {
-    globalThis.kiwi = kiwi;
-    await init(kiwi);
-});
-
-async function init(kiwi) {
-    const requiredFiles = [
-        'combiningRule.txt',
-        'default.dict',
-        'extract.mdl',
-        'multi.dict',
-        'sj.knlm',
-        'sj.morph',
-        'skipbigram.mdl',
-        'typo.dict',
-    ];
-
-    const files = await Promise.all(
-        requiredFiles.map(async (file) => {
-            const response = await fetch(`./model/${file}`);
-
-            if (!response.ok) {
-                throw new Error(`Failed to fetch ${file}`);
-            }
-
-            const data = await response.arrayBuffer();
-
-            return {
-                name: file,
-                data,
-            };
-        })
-    );
-
-    kiwi.FS.mkdir('model');
-    for (const file of files) {
-        kiwi.FS.writeFile(`model/${file.name}`, new Uint8Array(file.data));
+    switch (data.type) {
+        case 'inited':
+            inited(data.version);
+            break;
+        case 'analyzed':
+            analyzed(data.result, data.text);
+            break;
+        default:
+            console.error('Unknown worker message', data);
+            break;
     }
-    kiwi.init('model');
+};
+worker.postMessage({ type: 'init' });
 
-    elVersion.innerText = 'v' + kiwi.VERSION;
+function inited(version) {
+    elVersion.innerText = 'v' + version;
 
     elInput.hidden = false;
-    analyze();
     input.addEventListener('input', analyze);
+    analyze();
 }
 
-function analyze() {
-    const text = elInput.value;
-    const result = kiwi.analyze(text);
+function analyze(text = elInput.value) {
+    worker.postMessage({ type: 'analyze', text });
+}
 
+function analyzed(tokenInfos, text) {
     while (elResult.rows.length > 1) {
         elResult.deleteRow(1);
     }
 
-    for (let i = 0; i < result.size(); i++) {
-        const tokenInfo = result.get(i);
-
+    for (const tokenInfo of tokenInfos) {
         const surface = text.substring(
             tokenInfo.position,
             tokenInfo.position + tokenInfo.length
@@ -77,8 +48,8 @@ function analyze() {
         row.insertCell().innerText = tokenInfo.length;
         row.insertCell().innerText = surface;
         row.insertCell().innerText = tokenInfo.str;
-        row.insertCell().innerText = tokenInfo.tagToString();
+        row.insertCell().innerText = tokenInfo.tag;
     }
 
-    elResult.hidden = result.size() === 0;
+    elResult.hidden = tokenInfos.length === 0;
 }
