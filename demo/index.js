@@ -28,7 +28,8 @@ function inited(version) {
     analyze();
 }
 
-function analyze(text = elInput.value) {
+function analyze() {
+    const text = elInput.value;
     worker.postMessage({ type: 'analyze', text });
 }
 
